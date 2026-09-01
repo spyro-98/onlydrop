@@ -1,5 +1,7 @@
 # OnlyDrop
 
+![OnlyDrop terminal output](assets/onlydrop-terminal.png)
+
 Temporary, RAM-only LAN sharing from the terminal.
 
 OnlyDrop reads one file, a pipe, or `--text` into anonymous process memory, then exposes it through a tokenised HTTP URL that automatically expires. The original source is closed after loading, so it may be renamed, moved, or deleted while the drop is available.
