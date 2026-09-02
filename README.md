@@ -14,7 +14,10 @@ OnlyDrop reads one file, a pipe, or `--text` into anonymous process memory, then
 - random URL-safe token generated with OpenSSL;
 - file, stdin/pipe, or direct UTF-8 text input;
 - SHA-256 output, copyable URL, and optional terminal QR code;
+- explicit `Content-Length`, so download clients can show their own total and progress;
 - one transfer at a time, with an expiring download window;
+- live terminal progress with sent/total bytes, percentage, and transfer rate;
+- a `waiting for client (possibly paused)` status after three seconds with no outbound progress;
 - `graceful` expiry lets an already-open client connection continue, including a paused download;
 - `hard` expiry interrupts the active connection at the deadline;
 - a detected client cancellation or network write error closes the drop without counting a completed download.

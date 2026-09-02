@@ -11,6 +11,7 @@ This repository starts from the supplied OnlyDrop v0.1 technical specification. 
 - terminal QR rendering through libqrencode, with the exact printed URL as its payload;
 - IPv4 LAN address selection that avoids loopback, VPN, Docker, and VM interfaces when a private LAN address is available.
 - paused client connections remain active in `graceful` expiry mode; a detected client cancellation or network-write failure closes the drop without consuming a completed-download slot; `hard` expiry closes the active HTTP connection at its deadline.
+- interactive transfer progress showing bytes sent, total size, percentage, throughput, and a best-effort paused-client indication after three seconds without outbound progress.
 
 ## Deliberately unfinished work
 
