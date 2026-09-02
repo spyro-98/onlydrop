@@ -10,6 +10,12 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#elif defined(__linux__)
+#include <sys/sysinfo.h>
+#endif
+
 uint64_t onlydrop_monotonic_ns(void) {
     struct timespec value;
     if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) return 0U;
@@ -17,6 +23,35 @@ uint64_t onlydrop_monotonic_ns(void) {
 }
 
 int onlydrop_stdin_is_interactive(void) { return isatty(STDIN_FILENO); }
+
+int onlydrop_available_memory_bytes(uint64_t *output) {
+    if (output == NULL) return -1;
+#if defined(__APPLE__)
+    vm_statistics64_data_t statistics;
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    vm_size_t page_size = 0U;
+    const mach_port_t host = mach_host_self();
+    uint64_t reclaimable_pages;
+    if (host_page_size(host, &page_size) != KERN_SUCCESS ||
+        host_statistics64(host, HOST_VM_INFO64, (host_info64_t)&statistics, &count) != KERN_SUCCESS) {
+        return -1;
+    }
+    reclaimable_pages = (uint64_t)statistics.free_count + (uint64_t)statistics.inactive_count;
+    if (reclaimable_pages > UINT64_MAX / (uint64_t)page_size) return -1;
+    *output = reclaimable_pages * (uint64_t)page_size;
+    return 0;
+#elif defined(__linux__)
+    struct sysinfo information;
+    uint64_t pages;
+    if (sysinfo(&information) != 0) return -1;
+    pages = (uint64_t)information.freeram + (uint64_t)information.bufferram;
+    if (information.mem_unit == 0U || pages > UINT64_MAX / (uint64_t)information.mem_unit) return -1;
+    *output = pages * (uint64_t)information.mem_unit;
+    return 0;
+#else
+    return -1;
+#endif
+}
 
 static bool is_private_ipv4(uint32_t address) {
     return (address & UINT32_C(0xff000000)) == UINT32_C(0x0a000000) ||

@@ -7,5 +7,6 @@
 uint64_t onlydrop_monotonic_ns(void);
 int onlydrop_stdin_is_interactive(void);
 int onlydrop_choose_public_ipv4(const char *requested_bind, char *output, size_t output_size);
+int onlydrop_available_memory_bytes(uint64_t *output);
 
 #endif

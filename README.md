@@ -11,6 +11,7 @@ OnlyDrop reads one file, a pipe, or `--text` into anonymous process memory, then
 ## Features
 
 - no application-level disk fallback: the payload is loaded completely into RAM before networking starts;
+- visible pre-server loading progress for regular files, plus a conservative available-memory check that keeps a 512 MiB safety reserve;
 - random URL-safe token generated with OpenSSL;
 - file, stdin/pipe, or direct UTF-8 text input;
 - SHA-256 output, copyable URL, and optional terminal QR code;
@@ -75,7 +76,7 @@ The same full URL is encoded by `--qr`. The token is the access credential: do n
 
 ## Safety and current limitations
 
-OnlyDrop creates no deliberate temporary file or disk-backed payload cache. RAM-only does not prevent operating-system swap, filesystem cache, crash dumps, or network buffers from retaining data outside the process.
+OnlyDrop creates no deliberate temporary file or disk-backed payload cache. RAM-only does not prevent operating-system swap, filesystem cache, crash dumps, or network buffers from retaining data outside the process. Before reading a regular file, OnlyDrop checks reclaimable memory and refuses a payload that would leave less than 512 MiB available; memory pressure can still change after that check, so allocation and read errors remain possible and are reported without starting the server.
 
 This early version serves HTTP only. HTTPS, user-provided certificates, Range/resume support, multiple payloads, and concurrent transfers are intentionally out of scope until the core lifecycle is fully hardened.
 

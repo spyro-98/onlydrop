@@ -5,11 +5,34 @@
 #include "onlydrop/protocol.h"
 #include "onlydrop/security.h"
 
+#include <stdbool.h>
 #include <stdio.h>
+#include <unistd.h>
+
+typedef struct {
+    bool active;
+} loading_progress;
+
+static void report_loading_progress(size_t loaded, size_t total, void *context) {
+    loading_progress *progress = context;
+    const double loaded_mebibytes = (double)loaded / (1024.0 * 1024.0);
+    const double total_mebibytes = (double)total / (1024.0 * 1024.0);
+    const double percent = total == 0U ? 100.0 : ((double)loaded * 100.0) / (double)total;
+    if (!progress->active) return;
+    (void)fprintf(stderr, "\rLoading into RAM: %.1f MiB / %.1f MiB (%.1f%%)",
+                  loaded_mebibytes, total_mebibytes, percent);
+    (void)fflush(stderr);
+}
 
 static onlydrop_payload_result load_payload(const onlydrop_config *config, onlydrop_payload *payload) {
+    loading_progress progress = { .active = !config->quiet && !config->json && isatty(STDERR_FILENO) != 0 };
+    onlydrop_payload_result result;
     if (config->text != NULL) return onlydrop_payload_load_text(payload, config->text, config->name);
-    if (config->input_path != NULL) return onlydrop_payload_load_file(payload, config->input_path, config->name);
+    if (config->input_path != NULL) {
+        result = onlydrop_payload_load_file(payload, config->input_path, config->name, report_loading_progress, &progress);
+        if (progress.active) (void)fputc('\n', stderr);
+        return result;
+    }
     if (!onlydrop_stdin_is_interactive()) return onlydrop_payload_load_stdin(payload, config->name);
     (void)fprintf(stderr, "Error: provide FILE, piped stdin, or --text.\n");
     return ONLYDROP_PAYLOAD_OPEN_ERROR;

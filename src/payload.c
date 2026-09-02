@@ -1,17 +1,22 @@
 #include "onlydrop/payload.h"
+#include "onlydrop/platform.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #define ONLYDROP_FILE_READ_CHUNK (4U * 1024U * 1024U)
+#define ONLYDROP_PROGRESS_INTERVAL (16U * 1024U * 1024U)
+#define ONLYDROP_MEMORY_RESERVE (512ULL * 1024ULL * 1024ULL)
 
 static char *copy_name(const char *name) {
     const size_t length = strlen(name);
@@ -58,7 +63,25 @@ static onlydrop_payload_result append_fd(onlydrop_payload *payload, int fd, cons
     return finalize(payload, name);
 }
 
-static onlydrop_payload_result read_regular_file(onlydrop_payload *payload, int fd, size_t expected_size, const char *name) {
+static bool fits_memory_policy(size_t requested_size) {
+    uint64_t available_memory;
+    struct rlimit address_space_limit;
+    if (onlydrop_available_memory_bytes(&available_memory) == 0 &&
+        (available_memory <= ONLYDROP_MEMORY_RESERVE ||
+         (uint64_t)requested_size > available_memory - ONLYDROP_MEMORY_RESERVE)) {
+        return false;
+    }
+    if (getrlimit(RLIMIT_AS, &address_space_limit) == 0 && address_space_limit.rlim_cur != RLIM_INFINITY &&
+        (uintmax_t)requested_size > (uintmax_t)address_space_limit.rlim_cur) {
+        return false;
+    }
+    return true;
+}
+
+static onlydrop_payload_result read_regular_file(onlydrop_payload *payload, int fd, size_t expected_size, const char *name,
+                                                 onlydrop_payload_progress_callback progress, void *progress_context) {
+    size_t next_progress = 0U;
+    if (progress != NULL) progress(0U, expected_size, progress_context);
     while (payload->size < expected_size) {
         const size_t remaining = expected_size - payload->size;
         const size_t requested = remaining < ONLYDROP_FILE_READ_CHUNK ? remaining : ONLYDROP_FILE_READ_CHUNK;
@@ -69,13 +92,19 @@ static onlydrop_payload_result read_regular_file(onlydrop_payload *payload, int 
         }
         if (read_count == 0) return ONLYDROP_PAYLOAD_READ_ERROR;
         payload->size += (size_t)read_count;
+        if (progress != NULL && (payload->size >= next_progress || payload->size == expected_size)) {
+            progress(payload->size, expected_size, progress_context);
+            next_progress = payload->size > SIZE_MAX - ONLYDROP_PROGRESS_INTERVAL
+                ? SIZE_MAX : payload->size + ONLYDROP_PROGRESS_INTERVAL;
+        }
     }
     return finalize(payload, name);
 }
 
 void onlydrop_payload_init(onlydrop_payload *payload) { *payload = (onlydrop_payload){0}; }
 
-onlydrop_payload_result onlydrop_payload_load_file(onlydrop_payload *payload, const char *path, const char *name) {
+onlydrop_payload_result onlydrop_payload_load_file(onlydrop_payload *payload, const char *path, const char *name,
+                                                   onlydrop_payload_progress_callback progress, void *progress_context) {
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     struct stat file_info;
     onlydrop_payload_result result;
@@ -92,6 +121,10 @@ onlydrop_payload_result onlydrop_payload_load_file(onlydrop_payload *payload, co
         (void)close(fd);
         return ONLYDROP_PAYLOAD_TOO_LARGE;
     }
+    if (!fits_memory_policy((size_t)file_info.st_size)) {
+        (void)close(fd);
+        return ONLYDROP_PAYLOAD_MEMORY_UNSAFE;
+    }
     payload->data = malloc((size_t)file_info.st_size);
     if (payload->data == NULL) {
         (void)close(fd);
@@ -99,7 +132,8 @@ onlydrop_payload_result onlydrop_payload_load_file(onlydrop_payload *payload, co
     }
     payload->size = 0U;
     const char *base_name = strrchr(path, '/');
-    result = read_regular_file(payload, fd, (size_t)file_info.st_size, name != NULL ? name : (base_name != NULL ? base_name + 1U : path));
+    result = read_regular_file(payload, fd, (size_t)file_info.st_size,
+                               name != NULL ? name : (base_name != NULL ? base_name + 1U : path), progress, progress_context);
     if (result == ONLYDROP_PAYLOAD_OK) {
         struct stat final_info;
         if (fstat(fd, &final_info) != 0 || final_info.st_size != file_info.st_size) {
@@ -146,6 +180,7 @@ const char *onlydrop_payload_result_message(onlydrop_payload_result result) {
     switch (result) {
         case ONLYDROP_PAYLOAD_EMPTY: return "payload is empty";
         case ONLYDROP_PAYLOAD_OPEN_ERROR: return "input could not be opened";
+        case ONLYDROP_PAYLOAD_MEMORY_UNSAFE: return "payload would leave less than the 512 MiB RAM safety reserve";
         case ONLYDROP_PAYLOAD_MEMORY_ERROR: return "payload cannot fit in currently available process memory";
         case ONLYDROP_PAYLOAD_READ_ERROR: return "input changed or could not be read completely";
         case ONLYDROP_PAYLOAD_HASH_ERROR: return "SHA-256 calculation failed";
